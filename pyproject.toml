@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=78", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "website-screenshot-evidence-pack"
+version = "1.0.0"
+description = "Package supplied website screenshots with hashes and reviewable metadata."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "Logan Pendragon Multiverse" }]
+dependencies = ["Pillow>=11,<13"]
+
+[project.optional-dependencies]
+dev = ["build>=1.3,<2", "mypy>=1.15,<3", "pip-audit>=2.9,<3", "pytest>=8,<10", "pytest-cov>=6,<8", "ruff>=0.11,<1", "types-Pillow>=10,<13"]
+
+[project.scripts]
+screenshot-evidence-pack = "screenshot_evidence_pack.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=screenshot_evidence_pack --cov-branch --cov-report=term-missing --cov-fail-under=90"
