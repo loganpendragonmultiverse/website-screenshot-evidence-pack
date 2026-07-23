@@ -30,3 +30,7 @@ All processing is local. There are no accounts, uploads, analytics, cookies, or 
     python -m build
 
 Version 1.0.0 is feature complete for the documented formats and manifest schema. Focused improvements are welcome through reviewed pull requests. See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and the [MIT License](LICENSE).
+
+## More open-source projects
+
+This project is part of the [Logan Pendragon Forge open-source collection](https://www.loganpendragonforge.com/open-source/). Browse the catalog for other released tools, source repositories, live demos, and downloads.
