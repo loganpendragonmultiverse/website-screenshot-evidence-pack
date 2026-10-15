@@ -2,6 +2,9 @@
 
 ## 1.1.0 - Unreleased
 
+- Preflight archive and central-directory metadata before constructing ZipFile.
+- Restrict supplied archives to Stored/Deflate compression for bounded reads across supported Python patch versions.
+
 - Verify supplied ZIP packs directly without extraction, including screenshot hashes and image metadata.
 - Reject unsafe or duplicate archive paths, symlinks, ambiguous manifests, and excessive decompression.
 
