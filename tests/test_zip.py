@@ -91,7 +91,13 @@ def test_zip_tampering_and_manifest_errors(tmp_path: Path, change: str, expected
     "name", ["../evil", "/absolute", "C:/evil", "a/../evil", "a\\evil", "a//evil", "./evil"]
 )
 def test_rejects_unsafe_member_paths(tmp_path: Path, name: str) -> None:
-    assert "unsafe" in verify_zip(archive(tmp_path, {name: b"x"}))[0]
+    # Windows zipfile normalizes separators while writing; supply the raw ZIP
+    # bytes an external sender could provide instead of testing that normalizer.
+    stored_name = name.replace(chr(92), "/")
+    path = archive(tmp_path, {stored_name: b"x"})
+    if stored_name != name:
+        path.write_bytes(path.read_bytes().replace(stored_name.encode(), name.encode()))
+    assert "unsafe" in verify_zip(path)[0]
 
 
 def test_duplicate_case_collision_and_symlink_members(tmp_path: Path) -> None:
