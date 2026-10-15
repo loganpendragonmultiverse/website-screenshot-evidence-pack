@@ -8,7 +8,7 @@ It is intended for QA handoffs, change records, support cases, and personal rese
 
 Python 3.10 or newer is required.
 
-    python -m pip install "website-screenshot-evidence-pack @ https://github.com/loganpendragonmultiverse/website-screenshot-evidence-pack/releases/download/v1.0.0/website_screenshot_evidence_pack-1.0.0-py3-none-any.whl"
+    python -m pip install .
     screenshot-evidence-pack create home.png checkout.png --output evidence-20260722 --url "https://site.test/" --title "Checkout review" --browser "Firefox" --captured-at "2026-07-22T09:30:00-04:00" --note "Test account; no production submission" --zip
     screenshot-evidence-pack verify evidence-20260722
 
@@ -29,8 +29,12 @@ All processing is local. There are no accounts, uploads, analytics, cookies, or 
     pytest
     python -m build
 
-Version 1.0.0 is feature complete for the documented formats and manifest schema. Focused improvements are welcome through reviewed pull requests. See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and the [MIT License](LICENSE).
+The original release is feature complete for the documented formats and manifest schema. Focused improvements are welcome through reviewed pull requests. See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and the [MIT License](LICENSE).
 
 ## More open-source projects
 
 This project is part of the [Logan Pendragon Forge open-source collection](https://www.loganpendragonforge.com/open-source/). Browse the catalog for other released tools, source repositories, live demos, and downloads.
+
+## Verify a supplied ZIP
+
+Run `screenshot-evidence-pack verify supplied.zip` to verify an archive directly, without extraction or opening its HTML. The manifest may be at the ZIP root or inside one top-level folder. Verification checks screenshot bytes, hashes, formats, and dimensions and rejects unsafe paths, duplicate names (including case collisions), symlinks/special files, encrypted members, duplicate manifest references, and ambiguous manifests. Defaults limit archives to 4,096 members, 64 MiB per uncompressed member, 256 MiB total declared uncompressed data, and a 1 MiB manifest. `verify_zip(path, max_total_bytes=..., max_member_bytes=..., max_members=...)` supports smaller or larger positive limits for a trusted workflow. Verification reads bounded screenshot data into memory, never writes archive members, and does not authenticate operator-supplied URLs, timestamps, titles, browser details, or notes. Matching data and manifest can still be fabricated together; this is integrity checking, not provenance or legal admissibility.

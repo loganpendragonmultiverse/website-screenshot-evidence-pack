@@ -5,11 +5,14 @@ import html
 import json
 import re
 import shutil
+import stat
 import tempfile
 import zipfile
+import zlib
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from pathlib import Path
+from io import BytesIO
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from PIL import Image, UnidentifiedImageError
@@ -128,6 +131,8 @@ def create_pack(
 
 
 def verify_pack(pack: Path) -> list[str]:
+    if pack.is_file():
+        return verify_zip(pack)
     root = pack.expanduser().resolve()
     manifest_path = root / "manifest.json"
     if not manifest_path.is_file():
@@ -175,7 +180,132 @@ def verify_pack(pack: Path) -> list[str]:
     return errors
 
 
-def inspect_image(path: Path) -> tuple[str, int, int]:
+def _safe_zip_path(name: str) -> bool:
+    parts = name.rstrip("/").split("/")
+    return (
+        bool(name)
+        and not any(part in {"", ".", ".."} or ":" in part for part in parts)
+        and "\\" not in name
+        and "\x00" not in name
+    )
+
+
+def _read_member(archive: zipfile.ZipFile, member: zipfile.ZipInfo, limit: int) -> bytes:
+    with archive.open(member) as handle:
+        content = handle.read(limit + 1)
+    if len(content) > limit:
+        raise ValueError(f"{member.filename} exceeds decompression limit")
+    return content
+
+
+def verify_zip(
+    pack: Path,
+    *,
+    max_total_bytes: int = 256 * 1024 * 1024,
+    max_member_bytes: int = 64 * 1024 * 1024,
+    max_members: int = 4096,
+) -> list[str]:
+    """Verify a supplied ZIP in memory, without extracting or opening its HTML."""
+    if min(max_total_bytes, max_member_bytes, max_members) <= 0:
+        raise ValueError("ZIP limits must be positive")
+    try:
+        with zipfile.ZipFile(pack) as archive:
+            members = archive.infolist()
+            if len(members) > max_members:
+                return ["ZIP member count exceeds limit"]
+            seen: set[str] = set()
+            total = 0
+            files: dict[str, zipfile.ZipInfo] = {}
+            for member in members:
+                name = member.filename
+                if not _safe_zip_path(member.orig_filename):
+                    return [f"unsafe ZIP path: {name}"]
+                key = name.rstrip("/").casefold()
+                if key in seen:
+                    return [f"duplicate ZIP member: {name}"]
+                seen.add(key)
+                mode = stat.S_IFMT(member.external_attr >> 16)
+                if mode not in {0, stat.S_IFREG, stat.S_IFDIR}:
+                    return [f"unsupported ZIP member type (including symlinks): {name}"]
+                if member.flag_bits & 1:
+                    return [f"encrypted ZIP member is unsupported: {name}"]
+                total += member.file_size
+                if member.file_size > max_member_bytes or total > max_total_bytes:
+                    return ["ZIP declared decompressed size exceeds limit"]
+                if not member.is_dir():
+                    files[name] = member
+            manifests = [
+                name
+                for name in files
+                if PurePosixPath(name).name == "manifest.json" and name.count("/") <= 1
+            ]
+            if len(manifests) != 1:
+                return ["ZIP must contain exactly one root or single-folder manifest.json"]
+            manifest_name = manifests[0]
+            prefix = manifest_name[: -len("manifest.json")]
+            manifest = json.loads(
+                _read_member(
+                    archive, files[manifest_name], min(max_member_bytes, 1024 * 1024)
+                ).decode("utf-8")
+            )
+            if not isinstance(manifest, dict) or manifest.get("schemaVersion") != SCHEMA_VERSION:
+                return ["manifest schema version is unsupported"]
+            items = manifest.get("items")
+            if not isinstance(items, list) or not items:
+                return ["manifest items must be a nonempty list"]
+            errors: list[str] = []
+            referenced: set[str] = set()
+            for position, item in enumerate(items, 1):
+                if not isinstance(item, dict):
+                    errors.append(f"item {position} is not an object")
+                    continue
+                relative = item.get("packaged_path")
+                if (
+                    not isinstance(relative, str)
+                    or not _safe_zip_path(relative)
+                    or relative.endswith("/")
+                ):
+                    errors.append(f"item {position} has an unsafe packaged path")
+                    continue
+                if relative.casefold() in referenced:
+                    errors.append(f"duplicate manifest item: {relative}")
+                    continue
+                referenced.add(relative.casefold())
+                image_member = files.get(prefix + relative)
+                if image_member is None:
+                    errors.append(f"{relative} is missing")
+                    continue
+                content = _read_member(archive, image_member, max_member_bytes)
+                if len(content) != item.get("bytes"):
+                    errors.append(f"{relative} size does not match")
+                if hashlib.sha256(content).hexdigest() != item.get("sha256"):
+                    errors.append(f"{relative} SHA-256 does not match")
+                try:
+                    image_format, width, height = inspect_image(BytesIO(content))
+                except ValueError as exc:
+                    errors.append(f"{relative} is not a valid supported image: {exc}")
+                    continue
+                if [image_format, width, height] != [
+                    item.get("image_format"),
+                    item.get("width"),
+                    item.get("height"),
+                ]:
+                    errors.append(f"{relative} image metadata does not match")
+            return errors
+    except (
+        OSError,
+        ValueError,
+        UnicodeError,
+        zipfile.BadZipFile,
+        zlib.error,
+        EOFError,
+        RuntimeError,
+        NotImplementedError,
+    ) as exc:
+        return [f"ZIP is unreadable: {exc}"]
+
+
+def inspect_image(path: Path | BytesIO) -> tuple[str, int, int]:
     try:
         with Image.open(path) as image:
             image.verify()
@@ -184,7 +314,7 @@ def inspect_image(path: Path) -> tuple[str, int, int]:
             if image_format not in SUPPORTED_FORMATS:
                 raise ValueError(f"unsupported image format: {image_format or 'unknown'}")
             width, height = image.size
-    except (OSError, UnidentifiedImageError) as exc:
+    except (OSError, UnidentifiedImageError, Image.DecompressionBombError) as exc:
         raise ValueError("file is not a readable image") from exc
     return image_format, width, height
 
