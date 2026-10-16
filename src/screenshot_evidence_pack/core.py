@@ -206,7 +206,7 @@ def _preflight_zip(
     max_directory_bytes: int,
     max_entry_metadata_bytes: int,
     max_members: int,
-) -> None:
+) -> tuple[int, int]:
     """Bound classic ZIP metadata before ZipFile eagerly materializes it."""
     source.seek(0, 2)
     size = source.tell()
@@ -241,6 +241,10 @@ def _preflight_zip(
         raise ValueError("ZIP member count exceeds limit")
     if directory_size > max_directory_bytes:
         raise ValueError("ZIP central-directory metadata exceeds limit")
+    if end_position >= 20:
+        source.seek(end_position - 20)
+        if source.read(20).startswith(b"PK\x06\x07"):
+            raise ValueError("ZIP64 locator is unsupported")
     if offset + directory_size != end_position:
         raise ValueError("ZIP central-directory layout is unsupported")
     source.seek(offset)
@@ -269,6 +273,7 @@ def _preflight_zip(
     if actual_count != count:
         raise ValueError("ZIP central-directory member count does not match")
     source.seek(0)
+    return offset, actual_count
 
 
 def verify_zip(
@@ -296,7 +301,7 @@ def verify_zip(
         raise ValueError("ZIP limits must be positive")
     try:
         with pack.open("rb") as source:
-            _preflight_zip(
+            directory = _preflight_zip(
                 source,
                 max_archive_bytes=max_archive_bytes,
                 max_directory_bytes=max_directory_bytes,
@@ -305,6 +310,11 @@ def verify_zip(
             )
             with zipfile.ZipFile(source) as archive:
                 members = archive.infolist()
+                if (
+                    getattr(archive, "start_dir", None) != directory[0]
+                    or len(members) != directory[1]
+                ):
+                    return ["ZIP parsed directory does not match preflight"]
                 if len(members) > max_members:
                     return ["ZIP member count exceeds limit"]
                 seen: set[str] = set()

@@ -62,7 +62,7 @@ def reject_before_zipfile(
         ({"max_archive_bytes": 16}, "archive size", 0),
         ({"max_members": 2}, "member count", 22),
         ({"max_directory_bytes": 16}, "central-directory metadata", 22),
-        ({"max_entry_metadata_bytes": 2}, "per-entry metadata", 68),
+        ({"max_entry_metadata_bytes": 2}, "per-entry metadata", 88),
     ],
 )
 def test_small_budgets_reject_before_directory_materialization(
@@ -75,7 +75,7 @@ def test_small_budgets_reject_before_directory_materialization(
     data = small_zip()
     reader = reject_before_zipfile(tmp_path, monkeypatch, data, budgets, expected)
     assert sum(size for _, size in reader.reads) == read_bytes
-    assert all(size in {22, 46} for _, size in reader.reads)
+    assert all(size in {22, 20, 46} for _, size in reader.reads)
 
 
 def test_forged_low_entry_count_cannot_bypass_streamed_member_limit(
@@ -87,7 +87,7 @@ def test_forged_low_entry_count_cannot_bypass_streamed_member_limit(
     reader = reject_before_zipfile(
         tmp_path, monkeypatch, bytes(data), {"max_members": 1}, "member count"
     )
-    assert [size for _, size in reader.reads] == [22, 46]
+    assert [size for _, size in reader.reads] == [22, 20, 46]
 
 
 @pytest.mark.parametrize("method", [zipfile.ZIP_BZIP2, zipfile.ZIP_LZMA])
@@ -98,7 +98,7 @@ def test_unbounded_legacy_compression_methods_rejected_before_open(
 ) -> None:
     data = small_zip(count=1, method=method)
     reader = reject_before_zipfile(tmp_path, monkeypatch, data, {}, "unsupported ZIP compression")
-    assert [size for _, size in reader.reads] == [22, 46]
+    assert [size for _, size in reader.reads] == [22, 20, 46]
 
 
 @pytest.mark.parametrize("method", [zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED])
@@ -164,3 +164,89 @@ def test_malformed_directory_rejected_before_zipfile(
     elif damage == "count":
         struct.pack_into("<2H", data, end + 8, 1, 1)
     reject_before_zipfile(tmp_path, monkeypatch, bytes(data), {}, expected)
+
+
+def zip64_comment_shadow_directory() -> bytes:
+    def central(name: bytes, method: int, comment: bytes = b"") -> bytes:
+        header = struct.pack(
+            "<4s6H3L5H2L",
+            b"PK\x01\x02",
+            20,
+            20,
+            0,
+            method,
+            0,
+            0,
+            0,
+            0,
+            0,
+            len(name),
+            0,
+            len(comment),
+            0,
+            0,
+            0,
+            0,
+        )
+        return header + name + comment
+
+    name = b"manifest.json"
+    shadow = central(b"shadow", zipfile.ZIP_BZIP2)
+    shadow_offset = 46 + len(name)
+    zip64_offset = shadow_offset + len(shadow)
+    record = struct.pack(
+        "<4sQ2H2L4Q",
+        b"PK\x06\x06",
+        44,
+        45,
+        45,
+        0,
+        0,
+        1,
+        1,
+        len(shadow),
+        shadow_offset,
+    )
+    locator = struct.pack("<4sLQL", b"PK\x06\x07", 0, zip64_offset, 1)
+    directory = central(name, zipfile.ZIP_STORED, shadow + record + locator)
+    end = struct.pack("<4s4H2LH", b"PK\x05\x06", 0, 0, 1, 1, len(directory), 0, 0)
+    return directory + end
+
+
+def test_nonsentinel_zip64_locator_rejected_before_directory_materialization(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data = zip64_comment_shadow_directory()
+    assert len(data) < 300
+    classic = struct.unpack("<4s4H2LH", data[-22:])
+    assert classic[3:5] == (1, 1)
+    assert classic[5] < 0xFFFFFFFF and classic[6] == 0
+    # Demonstrate the parser mismatch with a tiny index, without opening a member.
+    with zipfile.ZipFile(BytesIO(data)) as archive:
+        assert archive.start_dir == 46 + len(b"manifest.json")
+        assert [item.compress_type for item in archive.infolist()] == [zipfile.ZIP_BZIP2]
+    reader = reject_before_zipfile(tmp_path, monkeypatch, data, {}, "ZIP64 locator")
+    assert reader.reads == [(len(data) - 22, 22), (len(data) - 42, 20)]
+
+
+@pytest.mark.parametrize("mismatch", ["start", "count"])
+def test_parsed_directory_must_agree_with_preflight(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mismatch: str,
+) -> None:
+    path = tmp_path / "supplied.zip"
+    path.write_bytes(small_zip(count=1))
+    real_constructor = zipfile.ZipFile
+
+    def redirected(*args: Any, **kwargs: Any) -> zipfile.ZipFile:
+        archive = real_constructor(*args, **kwargs)
+        if mismatch == "start":
+            archive.start_dir += 1
+        else:
+            archive.infolist().clear()
+        return archive
+
+    monkeypatch.setattr(zipfile, "ZipFile", redirected)
+    assert "parsed directory does not match preflight" in core.verify_zip(path)[0]
