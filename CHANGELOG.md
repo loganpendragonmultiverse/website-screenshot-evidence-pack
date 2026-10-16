@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.1.0 - Unreleased
+## 1.1.0 - 2026-10-16
 
 - Preflight archive and central-directory metadata before constructing ZipFile.
 - Restrict supplied archives to Stored/Deflate compression for bounded reads across supported Python patch versions.

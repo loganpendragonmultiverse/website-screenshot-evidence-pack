@@ -4,6 +4,10 @@ Website Screenshot Evidence Pack turns screenshots you already captured into a p
 
 It is intended for QA handoffs, change records, support cases, and personal research where a loose screenshot is not enough.
 
+## Version 1.1.0
+
+Verify supplied ZIP packs directly without extraction, including screenshot hashes and image metadata. Reject unsafe or duplicate archive paths, symlinks, ambiguous manifests, and excessive decompression.
+
 ## Three-minute use
 
 Python 3.10 or newer is required.
