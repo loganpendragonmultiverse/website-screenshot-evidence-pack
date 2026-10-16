@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.0 - 2026-10-16
+
+- Reject ZIP64 locators independently of classic EOCD sentinels and require parsed-directory agreement with preflight.
+
+- Preflight archive and central-directory metadata before constructing ZipFile.
+- Restrict supplied archives to Stored/Deflate compression for bounded reads across supported Python patch versions.
+
+- Verify supplied ZIP packs directly without extraction, including screenshot hashes and image metadata.
+- Reject unsafe or duplicate archive paths, symlinks, ambiguous manifests, and excessive decompression.
+
 ## 1.0.0 - 2026-07-22
 
 - Create byte-preserving evidence folders from supplied PNG, JPEG, and WebP screenshots.

@@ -24,7 +24,7 @@ def parser() -> argparse.ArgumentParser:
     create.add_argument("--captured-at")
     create.add_argument("--note", action="append", default=[])
     create.add_argument("--zip", action="store_true", dest="make_zip")
-    verify = commands.add_parser("verify", help="verify files against a pack manifest")
+    verify = commands.add_parser("verify", help="verify a folder or ZIP against its manifest")
     verify.add_argument("pack", type=Path)
     return root
 

@@ -5,12 +5,16 @@ import html
 import json
 import re
 import shutil
+import stat
+import struct
 import tempfile
 import zipfile
+import zlib
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any
+from io import BytesIO
+from pathlib import Path, PurePosixPath
+from typing import Any, BinaryIO
 
 from PIL import Image, UnidentifiedImageError
 
@@ -128,6 +132,8 @@ def create_pack(
 
 
 def verify_pack(pack: Path) -> list[str]:
+    if pack.is_file():
+        return verify_zip(pack)
     root = pack.expanduser().resolve()
     manifest_path = root / "manifest.json"
     if not manifest_path.is_file():
@@ -175,7 +181,238 @@ def verify_pack(pack: Path) -> list[str]:
     return errors
 
 
-def inspect_image(path: Path) -> tuple[str, int, int]:
+def _safe_zip_path(name: str) -> bool:
+    parts = name.rstrip("/").split("/")
+    return (
+        bool(name)
+        and not any(part in {"", ".", ".."} or ":" in part for part in parts)
+        and "\\" not in name
+        and "\x00" not in name
+    )
+
+
+def _read_member(archive: zipfile.ZipFile, member: zipfile.ZipInfo, limit: int) -> bytes:
+    with archive.open(member) as handle:
+        content = handle.read(limit + 1)
+    if len(content) > limit:
+        raise ValueError(f"{member.filename} exceeds decompression limit")
+    return content
+
+
+def _preflight_zip(
+    source: BinaryIO,
+    *,
+    max_archive_bytes: int,
+    max_directory_bytes: int,
+    max_entry_metadata_bytes: int,
+    max_members: int,
+) -> tuple[int, int]:
+    """Bound classic ZIP metadata before ZipFile eagerly materializes it."""
+    source.seek(0, 2)
+    size = source.tell()
+    if size > max_archive_bytes:
+        raise ValueError("ZIP archive size exceeds limit")
+    if size < 22:
+        raise ValueError("ZIP end record is missing")
+    source.seek(size - 22)
+    end = source.read(22)
+    end_position = size - 22
+    if end[:4] != b"PK\x05\x06" or end[20:22] != b"\x00\x00":
+        # Archive comments are at most 65,535 bytes in a classic ZIP.
+        tail_size = min(size, 65535 + 22)
+        source.seek(size - tail_size)
+        tail = source.read(tail_size)
+        position = tail.rfind(b"PK\x05\x06")
+        if position < 0 or len(tail) - position < 22:
+            raise ValueError("ZIP end record is missing")
+        end = tail[position : position + 22]
+        comment_size = struct.unpack_from("<H", end, 20)[0]
+        if position + 22 + comment_size != len(tail):
+            raise ValueError("ZIP end record comment length is invalid")
+        end_position = size - tail_size + position
+    _, disk, directory_disk, disk_count, count, directory_size, offset, _ = struct.unpack(
+        "<4s4H2LH", end
+    )
+    if count == 65535 or directory_size == 0xFFFFFFFF or offset == 0xFFFFFFFF:
+        raise ValueError("ZIP64 directory records are unsupported")
+    if disk or directory_disk or disk_count != count:
+        raise ValueError("multi-disk ZIP directories are unsupported")
+    if count > max_members:
+        raise ValueError("ZIP member count exceeds limit")
+    if directory_size > max_directory_bytes:
+        raise ValueError("ZIP central-directory metadata exceeds limit")
+    if end_position >= 20:
+        source.seek(end_position - 20)
+        if source.read(20).startswith(b"PK\x06\x07"):
+            raise ValueError("ZIP64 locator is unsupported")
+    if offset + directory_size != end_position:
+        raise ValueError("ZIP central-directory layout is unsupported")
+    source.seek(offset)
+    consumed = 0
+    actual_count = 0
+    while consumed < directory_size:
+        if actual_count >= max_members:
+            raise ValueError("ZIP member count exceeds limit")
+        if directory_size - consumed < 46:
+            raise ValueError("ZIP central directory is truncated")
+        header = source.read(46)
+        if len(header) != 46 or header[:4] != b"PK\x01\x02":
+            raise ValueError("ZIP central-directory header is invalid")
+        method = struct.unpack_from("<H", header, 10)[0]
+        if method not in {zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED}:
+            raise ValueError("unsupported ZIP compression; only Stored and Deflate are accepted")
+        name_size, extra_size, comment_size = struct.unpack_from("<3H", header, 28)
+        metadata_size = name_size + extra_size + comment_size
+        if metadata_size > max_entry_metadata_bytes:
+            raise ValueError("ZIP per-entry metadata exceeds limit")
+        consumed += 46 + metadata_size
+        if consumed > directory_size:
+            raise ValueError("ZIP central-directory entry is truncated")
+        source.seek(metadata_size, 1)
+        actual_count += 1
+    if actual_count != count:
+        raise ValueError("ZIP central-directory member count does not match")
+    source.seek(0)
+    return offset, actual_count
+
+
+def verify_zip(
+    pack: Path,
+    *,
+    max_total_bytes: int = 256 * 1024 * 1024,
+    max_member_bytes: int = 64 * 1024 * 1024,
+    max_members: int = 4096,
+    max_archive_bytes: int = 512 * 1024 * 1024,
+    max_directory_bytes: int = 8 * 1024 * 1024,
+    max_entry_metadata_bytes: int = 64 * 1024,
+) -> list[str]:
+    """Verify a supplied ZIP in memory, without extracting or opening its HTML."""
+    if (
+        min(
+            max_total_bytes,
+            max_member_bytes,
+            max_members,
+            max_archive_bytes,
+            max_directory_bytes,
+            max_entry_metadata_bytes,
+        )
+        <= 0
+    ):
+        raise ValueError("ZIP limits must be positive")
+    try:
+        with pack.open("rb") as source:
+            directory = _preflight_zip(
+                source,
+                max_archive_bytes=max_archive_bytes,
+                max_directory_bytes=max_directory_bytes,
+                max_entry_metadata_bytes=max_entry_metadata_bytes,
+                max_members=max_members,
+            )
+            with zipfile.ZipFile(source) as archive:
+                members = archive.infolist()
+                if (
+                    getattr(archive, "start_dir", None) != directory[0]
+                    or len(members) != directory[1]
+                ):
+                    return ["ZIP parsed directory does not match preflight"]
+                if len(members) > max_members:
+                    return ["ZIP member count exceeds limit"]
+                seen: set[str] = set()
+                total = 0
+                files: dict[str, zipfile.ZipInfo] = {}
+                for member in members:
+                    name = member.filename
+                    if not _safe_zip_path(member.orig_filename):
+                        return [f"unsafe ZIP path: {name}"]
+                    key = name.rstrip("/").casefold()
+                    if key in seen:
+                        return [f"duplicate ZIP member: {name}"]
+                    seen.add(key)
+                    mode = stat.S_IFMT(member.external_attr >> 16)
+                    if mode not in {0, stat.S_IFREG, stat.S_IFDIR}:
+                        return [f"unsupported ZIP member type (including symlinks): {name}"]
+                    if member.flag_bits & 1:
+                        return [f"encrypted ZIP member is unsupported: {name}"]
+                    total += member.file_size
+                    if member.file_size > max_member_bytes or total > max_total_bytes:
+                        return ["ZIP declared decompressed size exceeds limit"]
+                    if not member.is_dir():
+                        files[name] = member
+                manifests = [
+                    name
+                    for name in files
+                    if PurePosixPath(name).name == "manifest.json" and name.count("/") <= 1
+                ]
+                if len(manifests) != 1:
+                    return ["ZIP must contain exactly one root or single-folder manifest.json"]
+                manifest_name = manifests[0]
+                prefix = manifest_name[: -len("manifest.json")]
+                manifest = json.loads(
+                    _read_member(
+                        archive, files[manifest_name], min(max_member_bytes, 1024 * 1024)
+                    ).decode("utf-8")
+                )
+                if (
+                    not isinstance(manifest, dict)
+                    or manifest.get("schemaVersion") != SCHEMA_VERSION
+                ):
+                    return ["manifest schema version is unsupported"]
+                items = manifest.get("items")
+                if not isinstance(items, list) or not items:
+                    return ["manifest items must be a nonempty list"]
+                errors: list[str] = []
+                referenced: set[str] = set()
+                for position, item in enumerate(items, 1):
+                    if not isinstance(item, dict):
+                        errors.append(f"item {position} is not an object")
+                        continue
+                    relative = item.get("packaged_path")
+                    if (
+                        not isinstance(relative, str)
+                        or not _safe_zip_path(relative)
+                        or relative.endswith("/")
+                    ):
+                        errors.append(f"item {position} has an unsafe packaged path")
+                        continue
+                    if relative.casefold() in referenced:
+                        errors.append(f"duplicate manifest item: {relative}")
+                        continue
+                    referenced.add(relative.casefold())
+                    image_member = files.get(prefix + relative)
+                    if image_member is None:
+                        errors.append(f"{relative} is missing")
+                        continue
+                    content = _read_member(archive, image_member, max_member_bytes)
+                    if len(content) != item.get("bytes"):
+                        errors.append(f"{relative} size does not match")
+                    if hashlib.sha256(content).hexdigest() != item.get("sha256"):
+                        errors.append(f"{relative} SHA-256 does not match")
+                    try:
+                        image_format, width, height = inspect_image(BytesIO(content))
+                    except ValueError as exc:
+                        errors.append(f"{relative} is not a valid supported image: {exc}")
+                        continue
+                    if [image_format, width, height] != [
+                        item.get("image_format"),
+                        item.get("width"),
+                        item.get("height"),
+                    ]:
+                        errors.append(f"{relative} image metadata does not match")
+                return errors
+    except (
+        OSError,
+        ValueError,
+        UnicodeError,
+        zipfile.BadZipFile,
+        zlib.error,
+        EOFError,
+        RuntimeError,
+        NotImplementedError,
+    ) as exc:
+        return [f"ZIP is unreadable: {exc}"]
+
+
+def inspect_image(path: Path | BytesIO) -> tuple[str, int, int]:
     try:
         with Image.open(path) as image:
             image.verify()
@@ -184,7 +421,7 @@ def inspect_image(path: Path) -> tuple[str, int, int]:
             if image_format not in SUPPORTED_FORMATS:
                 raise ValueError(f"unsupported image format: {image_format or 'unknown'}")
             width, height = image.size
-    except (OSError, UnidentifiedImageError) as exc:
+    except (OSError, UnidentifiedImageError, Image.DecompressionBombError) as exc:
         raise ValueError("file is not a readable image") from exc
     return image_format, width, height
 
