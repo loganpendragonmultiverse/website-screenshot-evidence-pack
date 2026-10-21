@@ -29,3 +29,15 @@ metadata and image names. Record any platform-specific skips explicitly; a fixtu
 substitute does not prove a native junction or codec behavior.
 
 Each of the six native CI matrix cells also runs `python tests/verify_installed_distributions.py` after building. This installs the wheel and source distribution in separate fresh virtual environments, verifies module and packaged-guidance bytes against the reviewed source, runs the full unchanged coverage-gated suite outside the checkout, and exercises the installed example and console commands. Windows junction cases therefore execute against actual installed distributions.
+
+
+## 2.0.1 release workflow closure
+
+Tagged releases repeat the existing formatting, lint, strict typing, complete test
+suite and dependency audit before building. A strict stable tag must match both
+project metadata and the single literal runtime version. Verify wheel METADATA
+and sdist PKG-INFO Name, Version and Requires-Python against pyproject.toml, then
+require exactly those two distributions before writing SHA256SUMS. Exercise tag,
+runtime and built-metadata mismatch refusal controls alongside successful builds.
+Python support, all six native CI cells, coverage and branch protections stay
+unchanged. Installed artifacts and generated reports still require acceptance.

@@ -10,7 +10,7 @@ Verify supplied ZIP packs directly without extraction, including screenshot hash
 
 ## Three-minute use
 
-Python 3.11 or newer is required. Current release: **v2.0.0**. Python 3.10 is no longer supported.
+Python 3.11 or newer is required. Current release: **v2.0.1**. Python 3.10 is no longer supported.
 
     python -m pip install .
     screenshot-evidence-pack create home.png checkout.png --output evidence-20260722 --url "https://site.test/" --title "Checkout review" --browser "Firefox" --captured-at "2026-07-22T09:30:00-04:00" --note "Test account; no production submission" --zip

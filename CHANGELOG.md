@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.1 - 2026-10-21
+
+- Run the existing full formatting, lint, typing, test and dependency-audit gates in the tagged release workflow.
+- Refuse mismatched stable tags, project/runtime versions and built wheel/sdist package metadata before publishing the exact two payloads and their checksums.
+- Preserve Python 3.11+ support, screenshot verification behavior and the existing six native CI combinations.
+
 ## 2.0.0 - 2026-10-21
 
 - Require Python 3.11+ and Pillow 13 while preserving the full six-cell native CI matrix and all existing quality gates.
