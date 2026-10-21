@@ -4,16 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "website-screenshot-evidence-pack"
-version = "1.1.0"
+version = "2.0.0"
 description = "Package supplied website screenshots with hashes and reviewable metadata."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = "MIT"
 authors = [{ name = "Logan Pendragon Multiverse" }]
-dependencies = ["Pillow>=11,<13"]
+dependencies = ["Pillow>=13,<14"]
 
 [project.optional-dependencies]
-dev = ["build>=1.3,<2", "mypy>=1.15,<3", "pip-audit>=2.9,<3", "pytest>=8,<10", "pytest-cov>=6,<8", "ruff>=0.11,<1", "types-Pillow>=10,<13"]
+dev = ["build>=1.3,<2", "mypy>=1.15,<3", "pip-audit>=2.9,<3", "pytest>=8,<10", "pytest-cov>=6,<8", "ruff>=0.11,<1"]
 
 [project.scripts]
 screenshot-evidence-pack = "screenshot_evidence_pack.cli:main"
@@ -23,12 +23,17 @@ where = ["src"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py311"
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 strict = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--cov=screenshot_evidence_pack --cov-branch --cov-report=term-missing --cov-fail-under=90"
+
+[tool.setuptools.data-files]
+"share/doc/website-screenshot-evidence-pack" = ["README.md", "DEVELOPMENT.md", "TESTING.md", "CHANGELOG.md", "LICENSE"]
+"share/doc/website-screenshot-evidence-pack/docs" = ["docs/EVIDENCE-MODEL.md"]
+"share/doc/website-screenshot-evidence-pack/examples" = ["examples/README.md", "examples/create_example.py"]
