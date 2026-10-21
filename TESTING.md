@@ -27,3 +27,5 @@ all shipped documents and examples, and published SHA256SUMS. Run actual generat
 HTML in Chromium, Firefox and WebKit at desktop and narrow widths with long escaped
 metadata and image names. Record any platform-specific skips explicitly; a fixture
 substitute does not prove a native junction or codec behavior.
+
+Each of the six native CI matrix cells also runs `python tests/verify_installed_distributions.py` after building. This installs the wheel and source distribution in separate fresh virtual environments, verifies module and packaged-guidance bytes against the reviewed source, runs the full unchanged coverage-gated suite outside the checkout, and exercises the installed example and console commands. Windows junction cases therefore execute against actual installed distributions.

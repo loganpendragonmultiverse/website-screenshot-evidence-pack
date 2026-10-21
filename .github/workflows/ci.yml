@@ -24,6 +24,8 @@ jobs:
       - run: mypy src tests
       - run: pytest
       - run: python -m build
+      - name: Verify both installed distributions outside the checkout
+        run: python tests/verify_installed_distributions.py
   dependency-audit:
     runs-on: ubuntu-latest
     steps:

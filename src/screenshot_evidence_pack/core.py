@@ -329,15 +329,21 @@ def create_pack(
             },
             "items": [asdict(item) for item in items],
             "limitations": [
-                "The pack proves the packaged files and recorded metadata, not what was live at the URL.",
+                "The pack records supplied files and metadata, not what was live at the URL.",
                 "Capture metadata is supplied by the operator and is not independently authenticated.",
             ],
         }
         raw_manifest = (json.dumps(manifest, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
         if len(raw_manifest) > MAX_MANIFEST_BYTES:
             raise ValueError("manifest size exceeds limit")
+        raw_html = render_html(manifest).encode("utf-8")
+        if make_zip and (
+            max(len(raw_manifest), len(raw_html)) > max_member_bytes
+            or total + len(raw_manifest) + len(raw_html) > max_total_bytes
+        ):
+            raise ValueError("generated ZIP metadata or total bytes exceed limits")
         _write_new(staging / "manifest.json", raw_manifest)
-        (staging / "index.html").write_text(render_html(manifest), encoding="utf-8")
+        _write_new(staging / "index.html", raw_html)
         # Reserve without replacing an existing empty directory. Each file is exclusive.
         destination.mkdir()
         (destination / "screenshots").mkdir()

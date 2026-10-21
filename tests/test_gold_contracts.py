@@ -395,3 +395,89 @@ def test_consistent_data_descriptor_zip_is_supported(
     with zipfile.ZipFile(target) as archive:
         assert all(member.flag_bits & 8 for member in archive.infolist())
     assert core.verify_zip(target) == []
+
+
+@pytest.mark.parametrize("budget", ["max_member_bytes", "max_total_bytes"])
+def test_zip_creation_accounts_for_metadata_before_publish(tmp_path: Path, budget: str) -> None:
+    source = tmp_path / "image.png"
+    Image.new("RGB", (1, 1), "red").save(source)
+    original = source.read_bytes()
+    output = tmp_path / "pack"
+    with pytest.raises(ValueError, match="ZIP.*limits"):
+        core.create_pack(
+            [source],
+            output,
+            url="https://example.test",
+            make_zip=True,
+            max_member_bytes=len(original)
+            if budget == "max_member_bytes"
+            else core.MAX_MEMBER_BYTES,
+            max_total_bytes=len(original) if budget == "max_total_bytes" else core.MAX_TOTAL_BYTES,
+        )
+    assert not output.exists()
+    assert not output.with_suffix(".zip").exists()
+    assert source.read_bytes() == original
+
+
+def test_folder_byte_budget_remains_screenshot_only(tmp_path: Path) -> None:
+    source = tmp_path / "image.png"
+    Image.new("RGB", (1, 1), "red").save(source)
+    limits = {"max_member_bytes": source.stat().st_size, "max_total_bytes": source.stat().st_size}
+    output = core.create_pack(
+        [source],
+        tmp_path / "pack",
+        url="https://example.test",
+        max_member_bytes=limits["max_member_bytes"],
+        max_total_bytes=limits["max_total_bytes"],
+    )
+    assert (
+        core.verify_pack(
+            output,
+            max_member_bytes=limits["max_member_bytes"],
+            max_total_bytes=limits["max_total_bytes"],
+        )
+        == []
+    )
+
+
+def test_custom_zip_budgets_round_trip(tmp_path: Path) -> None:
+    source = tmp_path / "image.png"
+    Image.new("RGB", (1, 1), "red").save(source)
+    limits = {"max_member_bytes": 4096, "max_total_bytes": 8192}
+    output = core.create_pack(
+        [source],
+        tmp_path / "pack",
+        url="https://example.test",
+        make_zip=True,
+        max_member_bytes=limits["max_member_bytes"],
+        max_total_bytes=limits["max_total_bytes"],
+    )
+    assert (
+        core.verify_pack(
+            output,
+            max_member_bytes=limits["max_member_bytes"],
+            max_total_bytes=limits["max_total_bytes"],
+        )
+        == []
+    )
+    assert (
+        core.verify_zip(
+            output.with_suffix(".zip"),
+            max_member_bytes=limits["max_member_bytes"],
+            max_total_bytes=limits["max_total_bytes"],
+        )
+        == []
+    )
+
+
+def test_generated_manifest_limit_preserves_inputs_and_outputs(tmp_path: Path) -> None:
+    source = tmp_path / "image.png"
+    Image.new("RGB", (1, 1), "red").save(source)
+    original = source.read_bytes()
+    output = tmp_path / "pack"
+    with pytest.raises(ValueError, match="manifest size"):
+        core.create_pack(
+            [source], output, url="https://example.test", title="t" * core.MAX_MANIFEST_BYTES
+        )
+    assert source.read_bytes() == original
+    assert not output.exists()

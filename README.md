@@ -93,3 +93,5 @@ CHANGELOG, the evidence model and a synthetic example under share/doc.
 Resource budgets must be integers from 1 through `sys.maxsize - 1` on the active Python runtime. Larger values are rejected with a validation error before reading input or creating output.
 
 ZIP verification validates the complete bounded compressed stream, size and CRC of every supplied member, including extra HTML/files. Directory members with payloads are refused. Image decoding and manifest SHA-256 comparisons apply to referenced screenshots; CRC validation of other files does not authenticate their authorship or safety.
+
+Folder creation and verification count screenshot bytes for the screenshot budgets. ZIP verification counts every member, including manifest and HTML; ZIP creation checks those metadata members and the complete byte total against the same budgets before publishing a destination. Increase the ZIP member/total budgets when metadata would not fit. The generated manifest is always limited to 1 MiB.
