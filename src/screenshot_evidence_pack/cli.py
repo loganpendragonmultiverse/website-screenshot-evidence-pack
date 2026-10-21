@@ -26,6 +26,29 @@ def parser() -> argparse.ArgumentParser:
     create.add_argument("--zip", action="store_true", dest="make_zip")
     verify = commands.add_parser("verify", help="verify a folder or ZIP against its manifest")
     verify.add_argument("pack", type=Path)
+    for command in (create, verify):
+        command.add_argument(
+            "--max-image-bytes",
+            type=int,
+            default=64 * 1024 * 1024,
+            dest="max_member_bytes",
+            help="Maximum bytes per screenshot",
+        )
+        command.add_argument(
+            "--max-total-bytes",
+            type=int,
+            default=256 * 1024 * 1024,
+            help="Maximum total screenshot bytes",
+        )
+        command.add_argument(
+            "--max-members",
+            type=int,
+            default=4096,
+            help="Maximum entries; ZIP creation reserves two metadata entries",
+        )
+        command.add_argument(
+            "--max-pixels", type=int, default=40_000_000, help="Maximum pixels per image"
+        )
     return root
 
 
@@ -42,16 +65,26 @@ def main(argv: list[str] | None = None) -> int:
                 captured_at=args.captured_at,
                 notes=args.note,
                 make_zip=args.make_zip,
+                max_member_bytes=args.max_member_bytes,
+                max_total_bytes=args.max_total_bytes,
+                max_members=args.max_members,
+                max_pixels=args.max_pixels,
             )
             print(f"Created {destination}")
             return 0
-        errors = verify_pack(args.pack)
+        errors = verify_pack(
+            args.pack,
+            max_member_bytes=args.max_member_bytes,
+            max_total_bytes=args.max_total_bytes,
+            max_members=args.max_members,
+            max_pixels=args.max_pixels,
+        )
         if errors:
             for error in errors:
                 print(f"ERROR: {error}", file=sys.stderr)
             return 1
         print("Pack verified")
         return 0
-    except (OSError, ValueError) as exc:
+    except (OSError, TypeError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

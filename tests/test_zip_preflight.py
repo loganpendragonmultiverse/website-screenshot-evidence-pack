@@ -41,6 +41,8 @@ def reject_before_zipfile(
 ) -> TrackedReader:
     reader = TrackedReader(data)
     path = tmp_path / "supplied.zip"
+    # Keep a real regular leaf for the selected-input guard; reads stay tracked.
+    path.touch()
 
     def supplied_open(target: Path, *args: Any, **kwargs: Any) -> BinaryIO:
         assert target == path

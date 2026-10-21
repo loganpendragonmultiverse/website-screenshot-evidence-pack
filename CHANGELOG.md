@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.0 - 2026-10-21
+
+- Require Python 3.11+ and Pillow 13 while preserving the full six-cell native CI matrix and all existing quality gates.
+- Apply strict bounded typed manifests consistently to folders and ZIPs; reject linked folder evidence and complete-stream ZIP size/CRC mismatches.
+- Measure and copy the same bounded image bytes, enforce image pixel limits before decoding, and preserve existing or raced output paths.
+- Expose explicit CLI/API resource budgets, improve long-text HTML wrapping, and ship complete installed guidance and a synthetic example.
+
 ## 1.1.0 - 2026-10-16
 
 - Reject ZIP64 locators independently of classic EOCD sentinels and require parsed-directory agreement with preflight.
