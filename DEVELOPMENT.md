@@ -27,3 +27,15 @@ regressions. Reports authenticate neither operator context nor website provenanc
 Preserve existing output paths with exclusive creation; the new directory reservation
 must never replace an empty directory created by another process. Publication may be
 partial after a filesystem failure and is not a hostile-concurrency guarantee.
+
+
+## 2.0.1 release workflow closure
+
+Tagged releases repeat the existing formatting, lint, strict typing, complete test
+suite and dependency audit before building. A strict stable tag must match both
+project metadata and the single literal runtime version. Verify wheel METADATA
+and sdist PKG-INFO Name, Version and Requires-Python against pyproject.toml, then
+require exactly those two distributions before writing SHA256SUMS. Exercise tag,
+runtime and built-metadata mismatch refusal controls alongside successful builds.
+Python support, all six native CI cells, coverage and branch protections stay
+unchanged. Installed artifacts and generated reports still require acceptance.
